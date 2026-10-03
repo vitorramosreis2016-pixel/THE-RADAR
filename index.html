@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>THE RADAR - Storm Sandbox</title>
+    <!-- Conexão correta com a sua pasta css -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+    <div id="game-layout">
+        <!-- PAINEL LATERAL DE CONTROLES -->
+        <div id="controls">
+            <h2>Radar & Atmosfera</h2>
+            
+            <div class="param">
+                <label>Refletividade: <b id="lbl-dbz">45</b> dBZ</label>
+                <input type="range" id="sl-dbz" min="0" max="75" value="45">
+            </div>
+
+            <div class="param">
+                <label>Velocidade do Vento: <b id="lbl-vento">40</b> mph</label>
+                <input type="range" id="sl-vento" min="0" max="120" value="40">
+            </div>
+
+            <div class="param">
+                <label>Deslocamento do Sistema: <b id="lbl-desloc">25</b> mph</label>
+                <input type="range" id="sl-desloc" min="5" max="65" value="25">
+            </div>
+            
+            <div class="param">
+                <label>Velocity Couplet (Rotação):</label>
+                <select id="se-couplet">
+                    <option value="0">Ausente</option>
+                    <option value="1">Presente (Rotação Forte)</option>
+                </select>
+            </div>
+
+            <div id="alerts-box">
+                <h3>Alertas Ativos</h3>
+                <div id="alerts-list">Monitorando atmosfera...</div>
+            </div>
+        </div>
+
+        <!-- TELA DO RADAR -->
+        <div id="visuals">
+            <div class="screen">
+                <h3>Display do Radar (WSR-88D)</h3>
+                <canvas id="radarCanvas" width="450" height="450"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Conexão correta com a sua pasta js -->
+    <script src="js/app.js"></script>
+</body>
+</html>
