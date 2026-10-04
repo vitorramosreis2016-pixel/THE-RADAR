@@ -19,12 +19,17 @@ const btnVento = document.getElementById('btn-vento');
 const btnCc = document.getElementById('btn-cc');
 
 // Variáveis de Estado e Movimento
-let produtoAtivo = 'dbz'; // Pode ser: dbz, vento, cc
+let produtoAtivo = 'dbz'; 
 let anguloVarredura = 0;
-let tempestadeX = 150; // Posição inicial X
-let tempestadeY = 120; // Posição inicial Y
+let tempestadeX = 120; 
+let tempestadeY = 140; 
 
-// Gerenciador de cliques nos botões de produto
+// ========================================================
+// SISTEMA DE TDS CONFIGURADO PARA 38% DE CHANCE FIXA
+// ========================================================
+let tonaTerra = false;
+let ultimoEstadoCouplet = "0"; // Monitora quando o jogador ativa a rotação
+
 if(btnDbz && btnVento && btnCc) {
     btnDbz.addEventListener('click', () => alternarProduto('dbz', btnDbz));
     btnVento.addEventListener('click', () => alternarProduto('vento', btnVento));
@@ -46,7 +51,7 @@ function alternarProduto(produto, botaoAtivo) {
 
     if(produto === 'dbz') radarTitle.innerText = "Display Principal: Refletividade (dBZ)";
     if(produto === 'vento') radarTitle.innerText = "Display Principal: Velocidade Base (mph)";
-    if(produto === 'cc') radarTitle.innerText = "Display Principal: Correlação (CC)";
+    if(produto === 'cc') radarTitle.innerText = "Display Principal: Coeficiente de Correlação (CC)";
 }
 
 function atualizarLabels() {
@@ -58,25 +63,25 @@ function atualizarLabels() {
 function desenharRadar() {
     if (!ctx || !canvas) return;
 
-    // Fundo do radar
     ctx.fillStyle = '#000600';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    // Movimento Contínuo (A tempestade anda de verdade baseada no slider!)
-    const velDesloc = parseFloat(slDesloc.value) * 0.015;
-    tempestadeX += velDesloc * 0.6; // Desloca para Leste
-    tempestadeY += velDesloc * 0.3; // Desloca para Sul
+    // Deslocamento contínuo da supercélula
+    const velDesloc = parseFloat(slDesloc.value) * 0.012;
+    tempestadeX += velDesloc * 0.65; 
+    tempestadeY += velDesloc * 0.35; 
 
-    // Reseta a posição se sair totalmente da tela redonda
-    if (tempestadeX > canvas.width + 60 || tempestadeY > canvas.height + 60) {
+    if (tempestadeX > canvas.width + 80 || tempestadeY > canvas.height + 80) {
         tempestadeX = 40;
         tempestadeY = 60;
+        // Ao resetar a célula, desliga o tornado anterior para o próximo teste
+        tonaTerra = false; 
     }
 
-    // Desenha anéis concêntricos do radar
+    // Grade concêntrica do NEXRAD
     ctx.strokeStyle = '#002200';
     ctx.lineWidth = 1;
     for (let r = 45; r < cx; r += 45) {
@@ -91,59 +96,86 @@ function desenharRadar() {
 
     const dbzMax = parseInt(slDbz.value);
     const ventoMax = parseInt(slVento.value);
-    const temCouplet = seCouplet.value === "1";
+    const estadoCoupletAtual = seCouplet.value;
 
-    // Processamento de pixels da tempestade
-    for (let x = Math.floor(tempestadeX - 80); x < tempestadeX + 80; x++) {
-        for (let y = Math.floor(tempestadeY - 80); y < tempestadeY + 80; y++) {
+    // GATILHO MATEMÁTICO: Roda o sorteio de 38% apenas no momento em que a rotação é ligada
+    if (estadoCoupletAtual === "1" && ultimoEstadoCouplet === "0") {
+        let sorteio = Math.random(); // Gera um número quebrado entre 0 e 1
+        if (sorteio <= 0.38) { // 0.38 equivale a exatamente 38% de chance
+            tonaTerra = true; // Tornado confirmado tocando solo e erguendo detritos!
+        } else {
+            tonaTerra = false; // Rotação ficou apenas em altitude (Funnel Cloud/Sem TDS)
+        }
+    }
+    
+    // Se o jogador desligar a rotação, limpa o estado imediatamente
+    if (estadoCoupletAtual === "0") {
+        tonaTerra = false;
+    }
+    
+    // Salva o estado atual para comparar no próximo ciclo do frame
+    ultimoEstadoCouplet = estadoCoupletAtual;
+
+    // Renderização da Supercélula Clássica
+    for (let x = Math.floor(tempestadeX - 90); x < tempestadeX + 90; x++) {
+        for (let y = Math.floor(tempestadeY - 90); y < tempestadeY + 90; y++) {
             
             let dx = x - tempestadeX;
             let dy = y - tempestadeY;
             let raioOriginal = Math.sqrt(dx * dx + dy * dy);
 
-            if (raioOriginal < 60) {
+            if (raioOriginal < 70) {
                 let angulo = Math.atan2(dy, dx);
                 let raioModificado = raioOriginal;
 
-                if (temCouplet) {
-                    // MATEMÁTICA DO GANCHO EM ESPIRAL (Fim da Lua Crescente)
-                    let torcao = (60 - raioOriginal) * 0.055;
-                    angulo += torcao;
+                if (estadoCoupletAtual === "1") {
+                    // Torção em espiral concentrada perto do mesociclone
+                    if (raioOriginal < 55) {
+                        let efeitoPertoDoMesociclone = (55 - raioOriginal) * 0.065;
+                        angulo += efeitoPertoDoMesociclone;
+                    }
                     
-                    // Inflow Notch (Corta e molda a entrada de ar do gancho)
-                    if (angulo > -0.1 && angulo < 1.9) {
-                        raioModificado *= 1.55; 
+                    // Inflow Notch assimétrico (Formato de Rim acentuado com gancho)
+                    if (angulo > -0.3 && angulo < 1.6) {
+                        raioModificado *= 1.7; 
+                    }
+                    // Linha de instabilidade traseira (Flanking Line)
+                    if (angulo > 2.5 && angulo < 3.5) {
+                        raioModificado *= 0.85;
                     }
                 } else {
-                    // MATEMÁTICA DO RIM (Fim da Bola Perfeita)
-                    if (angulo > 0.8 && angulo < 2.3) {
-                        raioModificado *= 1.3;
+                    // Formato convectivo de Rim/Feijão padrão sem rotação
+                    if (angulo > 0.8 && angulo < 2.2) {
+                        raioModificado *= 1.4;
                     }
                 }
 
-                // Se o pixel processado estiver dentro do limite físico, renderiza
-                if (raioModificado < 36) {
-                    let dbzLocal = dbzMax * (1 - (raioModificado / 36));
+                if (raioModificado < 38) {
+                    let dbzLocal = dbzMax * (1 - (raioModificado / 38));
+
+                    // Cria o V-Notch na borda dianteira se não houver rotação
+                    if (estadoCoupletAtual === "0" && dx > 15 && Math.abs(dy) < 20) {
+                        dbzLocal += 8;
+                    }
 
                     if (dbzLocal > 12) {
-                        // EXIBE O PRODUTO SELECIONADO PELO BOTÃO
                         if (produtoAtivo === 'dbz') {
                             ctx.fillStyle = obterCorDbz(dbzLocal);
                         } 
                         else if (produtoAtivo === 'vento') {
-                            if (temCouplet && raioOriginal < 15) {
-                                // Dipolo de velocidade Gate-to-Gate (Verde entra, Vermelho sai)
+                            if (estadoCoupletAtual === "1" && raioOriginal < 12) {
+                                // Par de velocidades colado (Velocity Couplet Gate-to-Gate)
                                 ctx.fillStyle = (dx > 0) ? '#ff0000' : '#00ff00';
                             } else {
-                                ctx.fillStyle = dx < 0 ? '#007700' : '#770000';
+                                ctx.fillStyle = dx < -10 ? '#007700' : '#770000';
                             }
                         } 
                         else if (produtoAtivo === 'cc') {
-                            // Se tiver tornado tocando o chão no miolo do gancho -> Queda de CC (TDS)
-                            if (temCouplet && raioOriginal < 7 && dbzLocal > 46) {
-                                ctx.fillStyle = '#00ffff'; // Ciano (Detritos coletados)
+                            // Se a chance de 38% bateu, renderiza a mancha azul no centro do gancho
+                            if (estadoCoupletAtual === "1" && tonaTerra && raioOriginal < 6 && dbzLocal > 45) {
+                                ctx.fillStyle = '#00ffff'; // TDS Ativo!
                             } else {
-                                ctx.fillStyle = '#990000'; // Vermelho Escuro (Precipitação uniforme)
+                                ctx.fillStyle = '#990000'; // CC Alto limpo (Chuva uniforme)
                             }
                         }
                         ctx.fillRect(x, y, 1, 1);
@@ -153,7 +185,7 @@ function desenharRadar() {
         }
     }
 
-    // Linha de varredura giratória por cima
+    // Linha de varredura giratória
     ctx.strokeStyle = 'rgba(0, 255, 0, 0.18)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -176,7 +208,6 @@ function processarAlertas() {
     const dbz = parseInt(slDbz.value);
     const vento = parseInt(slVento.value);
     const desloc = parseInt(slDesloc.value);
-    const temCouplet = seCouplet.value === "1";
 
     let alertasHTML = [];
 
@@ -186,8 +217,9 @@ function processarAlertas() {
     if (desloc < 20) {
         alertasHTML.push('<div class="alerta flood">🌊 FLASH FLOOD WARNING</div>');
     }
-    if (temCouplet) {
-        if (vento >= 70 && dbz > 60) {
+    if (seCouplet.value === "1") {
+        // Alerta máximo NWS responde se o tornado de fato gerou detritos nos 38% de chance
+        if (tonaTerra && vento >= 70 && dbz > 60) {
             alertasHTML.push('<div class="alerta tornado" style="background:#4c0519; border:2px solid #ff0000;">🚨 PDS TORNADO WARNING (OBSERVED TDS)</div>');
         } else {
             alertasHTML.push('<div class="alerta tornado">🌪️ TORNADO WARNING (RADAR INDICATED)</div>');
