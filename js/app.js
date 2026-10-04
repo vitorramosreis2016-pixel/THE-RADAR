@@ -1,7 +1,6 @@
 const canvas = document.getElementById('radarCanvas');
 const ctx = canvas ? canvas.getContext('2d') : null;
 
-// Controles da UI
 const slDbz = document.getElementById('sl-dbz');
 const slVento = document.getElementById('sl-vento');
 const slDesloc = document.getElementById('sl-desloc');
@@ -13,45 +12,44 @@ const lblDesloc = document.getElementById('lbl-desloc');
 const alertsList = document.getElementById('alerts-list');
 const radarTitle = document.getElementById('radar-title');
 
-// Botões de Produto
 const btnDbz = document.getElementById('btn-dbz');
 const btnVento = document.getElementById('btn-vento');
 const btnCc = document.getElementById('btn-cc');
 
-// Variáveis de Estado e Movimento
 let produtoAtivo = 'dbz'; 
 let anguloVarredura = 0;
-let tempestadeX = 120; 
-let tempestadeY = 140; 
+let tempestadeX = 140; 
+let tempestadeY = 160; 
 
-// ========================================================
-// SISTEMA DE TDS CONFIGURADO PARA 38% DE CHANCE FIXA
-// ========================================================
 let tonaTerra = false;
-let ultimoEstadoCouplet = "0"; // Monitora quando o jogador ativa a rotação
+let ultimoEstadoCouplet = "0"; 
 
-if(btnDbz && btnVento && btnCc) {
-    btnDbz.addEventListener('click', () => alternarProduto('dbz', btnDbz));
-    btnVento.addEventListener('click', () => alternarProduto('vento', btnVento));
-    btnCc.addEventListener('click', () => alternarProduto('cc', btnCc));
+if (btnDbz && btnVento && btnCc) {
+    btnDbz.addEventListener('click', function() { alternarProduto('dbz', btnDbz); });
+    btnVento.addEventListener('click', function() { alternarProduto('vento', btnVento); });
+    btnCc.addEventListener('click', function() { alternarProduto('cc', btnCc); });
 }
 
 function alternarProduto(produto, botaoAtivo) {
     produtoAtivo = produto;
-    [btnDbz, btnVento, btnCc].forEach(btn => {
-        btn.style.background = '#222';
-        btn.style.color = '#fff';
-        btn.style.fontWeight = 'normal';
-        btn.style.border = '1px solid #444';
+    [btnDbz, btnVento, btnCc].forEach(function(btn) {
+        if (btn) {
+            btn.style.background = '#222';
+            btn.style.color = '#fff';
+            btn.style.fontWeight = 'normal';
+            btn.style.border = '1px solid #444';
+        }
     });
-    botaoAtivo.style.background = '#00ff00';
-    botaoAtivo.style.color = '#000';
-    botaoAtivo.style.fontWeight = 'bold';
-    botaoAtivo.style.border = 'none';
+    if (botaoAtivo) {
+        botaoAtivo.style.background = '#00ff00';
+        botaoAtivo.style.color = '#000';
+        botaoAtivo.style.fontWeight = 'bold';
+        botaoAtivo.style.border = 'none';
+    }
 
-    if(produto === 'dbz') radarTitle.innerText = "Display Principal: Refletividade (dBZ)";
-    if(produto === 'vento') radarTitle.innerText = "Display Principal: Velocidade Base (mph)";
-    if(produto === 'cc') radarTitle.innerText = "Display Principal: Coeficiente de Correlação (CC)";
+    if (produto === 'dbz' && radarTitle) radarTitle.innerText = "Display Principal: Refletividade (dBZ)";
+    if (produto === 'vento' && radarTitle) radarTitle.innerText = "Display Principal: Velocidade Base (mph)";
+    if (produto === 'cc' && radarTitle) radarTitle.innerText = "Display Principal: Coeficiente de Correlação (CC)";
 }
 
 function atualizarLabels() {
@@ -60,132 +58,128 @@ function atualizarLabels() {
     if (slDesloc && lblDesloc) lblDesloc.innerText = slDesloc.value;
 }
 
+function desenharGrade(contexto, width, height) {
+    if (!contexto) return;
+    contexto.fillStyle = '#000600';
+    contexto.fillRect(0, 0, width, height);
+
+    contexto.strokeStyle = '#002200';
+    contexto.lineWidth = 1;
+    for (let r = 45; r < width / 2; r += 45) {
+        contexto.beginPath();
+        contexto.arc(width / 2, height / 2, r, 0, 2 * Math.PI);
+        contexto.stroke();
+    }
+    contexto.beginPath();
+    contexto.moveTo(width / 2, 0); contexto.lineTo(width / 2, height);
+    contexto.moveTo(0, height / 2); contexto.lineTo(width, height / 2);
+    contexto.stroke();
+}
+
 function desenharRadar() {
     if (!ctx || !canvas) return;
 
-    ctx.fillStyle = '#000600';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    desenharGrade(ctx, canvas.width, canvas.height);
 
     const cx = canvas.width / 2;
     const cy = canvas.height / 2;
 
-    // Deslocamento contínuo da supercélula
-    const velDesloc = parseFloat(slDesloc.value) * 0.012;
-    tempestadeX += velDesloc * 0.65; 
-    tempestadeY += velDesloc * 0.35; 
+    const velDesloc = slDesloc ? parseFloat(slDesloc.value) * 0.015 : 0.3;
+    tempestadeX += velDesloc * 0.6; 
+    tempestadeY += velDesloc * 0.3; 
 
-    if (tempestadeX > canvas.width + 80 || tempestadeY > canvas.height + 80) {
+    if (tempestadeX > canvas.width + 100 || tempestadeY > canvas.height + 100) {
         tempestadeX = 40;
         tempestadeY = 60;
-        // Ao resetar a célula, desliga o tornado anterior para o próximo teste
         tonaTerra = false; 
     }
 
-    // Grade concêntrica do NEXRAD
-    ctx.strokeStyle = '#002200';
-    ctx.lineWidth = 1;
-    for (let r = 45; r < cx; r += 45) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, 2 * Math.PI);
-        ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
-    ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
-    ctx.stroke();
+    const dbzMax = slDbz ? parseInt(slDbz.value) : 45;
+    const ventoMax = slVento ? parseInt(slVento.value) : 40;
+    const estadoCoupletAtual = seCouplet ? seCouplet.value : "0";
 
-    const dbzMax = parseInt(slDbz.value);
-    const ventoMax = parseInt(slVento.value);
-    const estadoCoupletAtual = seCouplet.value;
-
-    // GATILHO MATEMÁTICO: Roda o sorteio de 38% apenas no momento em que a rotação é ligada
     if (estadoCoupletAtual === "1" && ultimoEstadoCouplet === "0") {
-        let sorteio = Math.random(); // Gera um número quebrado entre 0 e 1
-        if (sorteio <= 0.38) { // 0.38 equivale a exatamente 38% de chance
-            tonaTerra = true; // Tornado confirmado tocando solo e erguendo detritos!
+        if (Math.random() <= 0.38) { 
+            tonaTerra = true; 
         } else {
-            tonaTerra = false; // Rotação ficou apenas em altitude (Funnel Cloud/Sem TDS)
+            tonaTerra = false; 
         }
     }
-    
-    // Se o jogador desligar a rotação, limpa o estado imediatamente
-    if (estadoCoupletAtual === "0") {
-        tonaTerra = false;
-    }
-    
-    // Salva o estado atual para comparar no próximo ciclo do frame
+    if (estadoCoupletAtual === "0") tonaTerra = false;
     ultimoEstadoCouplet = estadoCoupletAtual;
 
-    // Renderização da Supercélula Clássica
-    for (let x = Math.floor(tempestadeX - 90); x < tempestadeX + 90; x++) {
-        for (let y = Math.floor(tempestadeY - 90); y < tempestadeY + 90; y++) {
+    const mesoX = tempestadeX + 15;
+    const mesoY = tempestadeY + 25;
+
+    for (let x = Math.floor(tempestadeX - 90); x < tempestadeX + 120; x++) {
+        for (let y = Math.floor(tempestadeY - 90); y < tempestadeY + 120; y++) {
             
-            let dx = x - tempestadeX;
-            let dy = y - tempestadeY;
-            let raioOriginal = Math.sqrt(dx * dx + dy * dy);
+            let dxCorpo = x - tempestadeX;
+            let dyCorpo = y - tempestadeY;
+            let anguloCorpo = Math.atan2(dyCorpo, dxCorpo);
+            let raioCorpo = Math.sqrt(dxCorpo * dxCorpo + dyCorpo * dyCorpo);
 
-            if (raioOriginal < 70) {
-                let angulo = Math.atan2(dy, dx);
-                let raioModificado = raioOriginal;
+            let distorcaoRim = 1.0;
+            if (anguloCorpo > -1.5 && anguloCorpo < 0.5) distorcaoRim = 0.7; 
+            if (anguloCorpo > 1.0 && anguloCorpo < 2.5) distorcaoRim = 1.6;  
 
-                if (estadoCoupletAtual === "1") {
-                    // Torção em espiral concentrada perto do mesociclone
-                    if (raioOriginal < 55) {
-                        let efeitoPertoDoMesociclone = (55 - raioOriginal) * 0.065;
-                        angulo += efeitoPertoDoMesociclone;
-                    }
+            let naSupercelula = (raioCorpo * distorcaoRim) < 45;
+            let dbzLocal = 0;
+
+            if (naSupercelula) {
+                dbzLocal = dbzMax * (1 - (raioCorpo * distorcaoRim / 45));
+            }
+
+            let noGancho = false;
+            if (estadoCoupletAtual === "1") {
+                let dxMeso = x - mesoX;
+                let dyMeso = y - mesoY;
+                let raioMeso = Math.sqrt(dxMeso * dxMeso + dyMeso * dyMeso);
+                let anguloMeso = Math.atan2(dyMeso, dxMeso);
+
+                if (raioMeso > 8 && raioMeso < 24) {
+                    let anguloGanchoDesejado = (raioMeso * 0.18) - 2.4; 
+                    let diferencaAngulo = Math.abs(anguloMeso - anguloGanchoDesejado);
                     
-                    // Inflow Notch assimétrico (Formato de Rim acentuado com gancho)
-                    if (angulo > -0.3 && angulo < 1.6) {
-                        raioModificado *= 1.7; 
-                    }
-                    // Linha de instabilidade traseira (Flanking Line)
-                    if (angulo > 2.5 && angulo < 3.5) {
-                        raioModificado *= 0.85;
-                    }
-                } else {
-                    // Formato convectivo de Rim/Feijão padrão sem rotação
-                    if (angulo > 0.8 && angulo < 2.2) {
-                        raioModificado *= 1.4;
+                    if (diferencaAngulo < 0.35) {
+                        noGancho = true;
+                        let dbzGancho = dbzMax * 0.85 * (1 - (raioMeso / 30));
+                        if (dbzGancho > dbzLocal) dbzLocal = dbzGancho;
                     }
                 }
+                
+                if (raioMeso <= 8) {
+                    noGancho = true;
+                    dbzLocal = dbzMax * 0.95; 
+                }
+            }
 
-                if (raioModificado < 38) {
-                    let dbzLocal = dbzMax * (1 - (raioModificado / 38));
+            if ((naSupercelula || noGancho) && dbzLocal > 12) {
+                let dxMeso = x - mesoX;
+                let raioMeso = Math.sqrt(dxMeso * dxMeso + (y - mesoY) * (y - mesoY));
 
-                    // Cria o V-Notch na borda dianteira se não houver rotação
-                    if (estadoCoupletAtual === "0" && dx > 15 && Math.abs(dy) < 20) {
-                        dbzLocal += 8;
+                if (produtoAtivo === 'dbz') {
+                    ctx.fillStyle = obterCorDbz(dbzLocal);
+                } 
+                else if (produtoAtivo === 'vento') {
+                    if (estadoCoupletAtual === "1" && raioMeso < 12) {
+                        ctx.fillStyle = (dxMeso > 0) ? '#ff0000' : '#00ff00'; 
+                    } else {
+                        ctx.fillStyle = dxCorpo < 0 ? '#006600' : '#660000';
                     }
-
-                    if (dbzLocal > 12) {
-                        if (produtoAtivo === 'dbz') {
-                            ctx.fillStyle = obterCorDbz(dbzLocal);
-                        } 
-                        else if (produtoAtivo === 'vento') {
-                            if (estadoCoupletAtual === "1" && raioOriginal < 12) {
-                                // Par de velocidades colado (Velocity Couplet Gate-to-Gate)
-                                ctx.fillStyle = (dx > 0) ? '#ff0000' : '#00ff00';
-                            } else {
-                                ctx.fillStyle = dx < -10 ? '#007700' : '#770000';
-                            }
-                        } 
-                        else if (produtoAtivo === 'cc') {
-                            // Se a chance de 38% bateu, renderiza a mancha azul no centro do gancho
-                            if (estadoCoupletAtual === "1" && tonaTerra && raioOriginal < 6 && dbzLocal > 45) {
-                                ctx.fillStyle = '#00ffff'; // TDS Ativo!
-                            } else {
-                                ctx.fillStyle = '#990000'; // CC Alto limpo (Chuva uniforme)
-                            }
-                        }
-                        ctx.fillRect(x, y, 1, 1);
+                } 
+                else if (produtoAtivo === 'cc') {
+                    if (estadoCoupletAtual === "1" && tonaTerra && raioMeso < 6 && dbzLocal > 45) {
+                        ctx.fillStyle = '#00ffff'; 
+                    } else {
+                        ctx.fillStyle = '#990000'; 
                     }
                 }
+                ctx.fillRect(x, y, 1, 1);
             }
         }
     }
 
-    // Linha de varredura giratória
     ctx.strokeStyle = 'rgba(0, 255, 0, 0.18)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -197,10 +191,10 @@ function desenharRadar() {
 }
 
 function obterCorDbz(dbz) {
-    if (dbz > 55) return '#ff00ff';
-    if (dbz > 45) return '#ff0000';
-    if (dbz > 30) return '#ffff00';
-    return '#00ff00';
+    if (dbz > 55) return '#ff00ff'; 
+    if (dbz > 45) return '#ff0000'; 
+    if (dbz > 30) return '#ffff00'; 
+    return '#00ff00';                
 }
 
 function processarAlertas() {
@@ -217,8 +211,7 @@ function processarAlertas() {
     if (desloc < 20) {
         alertasHTML.push('<div class="alerta flood">🌊 FLASH FLOOD WARNING</div>');
     }
-    if (seCouplet.value === "1") {
-        // Alerta máximo NWS responde se o tornado de fato gerou detritos nos 38% de chance
+    if (seCouplet && seCouplet.value === "1") {
         if (tonaTerra && vento >= 70 && dbz > 60) {
             alertasHTML.push('<div class="alerta tornado" style="background:#4c0519; border:2px solid #ff0000;">🚨 PDS TORNADO WARNING (OBSERVED TDS)</div>');
         } else {
