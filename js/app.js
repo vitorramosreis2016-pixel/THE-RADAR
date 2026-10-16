@@ -1,588 +1,582 @@
 
-const canvas = document.getElementById('radarCanvas');
-const ctx = canvas ? canvas.getContext('2d') : null;
+(() => {
+    "use strict";
 
-// ============================================================
-// THE-RADAR 0.2 — Simulador de produtos de radar meteorológico
-// Produtos: Reflectivity, Base Velocity, SRV, CC e KDP
-// Radar Doppler posicionado no centro do canvas.
-// ============================================================
+    const canvas = document.getElementById("radarCanvas");
+    const ctx = canvas?.getContext("2d");
 
-// Controles da interface
-const slDbz = document.getElementById('sl-dbz');
-const slVento = document.getElementById('sl-vento');
-const slDesloc = document.getElementById('sl-desloc');
-const seCouplet = document.getElementById('se-couplet');
-
-const lblDbz = document.getElementById('lbl-dbz');
-const lblVento = document.getElementById('lbl-vento');
-const lblDesloc = document.getElementById('lbl-desloc');
-const alertsList = document.getElementById('alerts-list');
-const radarTitle = document.getElementById('radar-title');
-
-// Botões de produto existentes
-const btnDbz = document.getElementById('btn-dbz');
-const btnVento = document.getElementById('btn-vento');
-const btnCc = document.getElementById('btn-cc');
-
-// Criar botões novos caso não estejam no HTML
-function criarBotaoProduto(id, texto, referencia) {
-    let botao = document.getElementById(id);
-    if (botao) return botao;
-
-    if (!referencia || !referencia.parentElement) return null;
-
-    botao = document.createElement('button');
-    botao.id = id;
-    botao.type = 'button';
-    botao.textContent = texto;
-    botao.style.cssText = [
-        'background:#222',
-        'color:#fff',
-        'border:1px solid #444',
-        'padding:8px 12px',
-        'margin:3px',
-        'cursor:pointer',
-        'font-weight:normal'
-    ].join(';');
-
-    referencia.insertAdjacentElement('afterend', botao);
-    return botao;
-}
-
-const btnSrv = criarBotaoProduto('btn-srv', 'SRV', btnCc);
-const btnKdp = criarBotaoProduto('btn-kdp', 'KDP', btnSrv || btnCc);
-
-// Estado do simulador
-let produtoAtivo = 'dbz';
-let anguloVarredura = 0;
-
-let tempestadeX = 140;
-let tempestadeY = 160;
-
-let tonaTerra = false;
-let ultimoEstadoCouplet = '0';
-
-// Produtos disponíveis
-const produtos = {
-    dbz: {
-        titulo: 'Refletividade (dBZ)',
-        unidade: 'dBZ'
-    },
-    vento: {
-        titulo: 'Velocidade Base (mph)',
-        unidade: 'mph'
-    },
-    srv: {
-        titulo: 'Storm-Relative Velocity — SRV (mph)',
-        unidade: 'mph'
-    },
-    cc: {
-        titulo: 'Coeficiente de Correlação — CC',
-        unidade: ''
-    },
-    kdp: {
-        titulo: 'Specific Differential Phase — KDP (°/km)',
-        unidade: '°/km'
-    }
-};
-
-// ============================================================
-// INTERFACE
-// ============================================================
-
-function obterBotoesProduto() {
-    return [
-        [btnDbz, 'dbz'],
-        [btnVento, 'vento'],
-        [btnSrv, 'srv'],
-        [btnCc, 'cc'],
-        [btnKdp, 'kdp']
-    ];
-}
-
-function alternarProduto(produto) {
-    if (!produtos[produto]) return;
-
-    produtoAtivo = produto;
-
-    for (const [botao, chave] of obterBotoesProduto()) {
-        if (!botao) continue;
-
-        const ativo = chave === produto;
-
-        botao.style.background = ativo ? '#00ff00' : '#222';
-        botao.style.color = ativo ? '#000' : '#fff';
-        botao.style.fontWeight = ativo ? 'bold' : 'normal';
-        botao.style.border = ativo ? 'none' : '1px solid #444';
-        botao.setAttribute('aria-pressed', String(ativo));
+    if (!canvas || !ctx) {
+        console.error("THE-RADAR: canvas radarCanvas não encontrado.");
+        return;
     }
 
-    if (radarTitle) {
-        radarTitle.textContent =
-            `Display Principal: ${produtos[produto].titulo}`;
-    }
-}
+    // Controles existentes no HTML
+    const $ = id => document.getElementById(id);
 
-for (const [botao, produto] of obterBotoesProduto()) {
-    if (botao) {
-        botao.addEventListener('click', () => {
-            alternarProduto(produto);
+    const slDbz = $("sl-dbz");
+    const slVento = $("sl-vento");
+    const slDesloc = $("sl-desloc");
+    const seCouplet = $("se-couplet");
+
+    const lblDbz = $("lbl-dbz");
+    const lblVento = $("lbl-vento");
+    const lblDesloc = $("lbl-desloc");
+    const alertsList = $("alerts-list");
+    const radarTitle = $("radar-title");
+
+    const btnDbz = $("btn-dbz");
+    const btnVento = $("btn-vento");
+    const btnCc = $("btn-cc");
+
+    if (![slDbz, slVento, slDesloc, seCouplet].every(Boolean)) {
+        console.error("THE-RADAR: faltam controles obrigatórios no HTML.");
+        return;
+    }
+
+    // Adiciona SRV e KDP sem exigir alterações no HTML.
+    const productContainer = btnDbz?.parentElement;
+    const buttons = {
+        dbz: btnDbz,
+        vento: btnVento,
+        cc: btnCc
+    };
+
+    function criarBotaoProduto(id, texto) {
+        if (!productContainer) return null;
+
+        let button = $(id);
+        if (button) return button;
+
+        button = document.createElement("button");
+        button.id = id;
+        button.className = "btn-product";
+        button.textContent = texto;
+        button.style.cssText =
+            "flex:1;padding:6px;background:#222;color:#fff;" +
+            "border:1px solid #444;border-radius:4px;cursor:pointer;";
+
+        productContainer.appendChild(button);
+        return button;
+    }
+
+    buttons.srv = criarBotaoProduto("btn-srv", "SRV");
+    buttons.kdp = criarBotaoProduto("btn-kdp", "KDP");
+
+    const nomesProdutos = {
+        dbz: "Refletividade (dBZ)",
+        vento: "Velocidade Base (mph)",
+        srv: "Storm Relative Velocity (mph)",
+        cc: "Coeficiente de Correlação (CC)",
+        kdp: "Fase Diferencial Específica (°/km)"
+    };
+
+    let produtoAtivo = "dbz";
+    let anguloVarredura = 0;
+
+    // Estado da tempestade
+    let tempestadeX = 145;
+    let tempestadeY = 155;
+    let idadeTempestade = 0;
+    let vitalidade = 100;
+    let intensidadeAtual = 0;
+    let dissipou = false;
+    let ultimoTempo = performance.now();
+
+    // Assinatura de detritos apenas simulada.
+    let possivelTds = false;
+    let ultimoEstadoCouplet = "0";
+
+    const limitar = (v, min, max) =>
+        Math.max(min, Math.min(max, v));
+
+    const interpolar = (a, b, t) => a + (b - a) * t;
+
+    function atualizarLabels() {
+        if (lblDbz) lblDbz.textContent = slDbz.value;
+        if (lblVento) lblVento.textContent = slVento.value;
+        if (lblDesloc) lblDesloc.textContent = slDesloc.value;
+    }
+
+    function alternarProduto(produto) {
+        produtoAtivo = produto;
+
+        Object.entries(buttons).forEach(([nome, botao]) => {
+            if (!botao) return;
+
+            const ativo = nome === produto;
+            botao.style.background = ativo ? "#00ff00" : "#222";
+            botao.style.color = ativo ? "#000" : "#fff";
+            botao.style.fontWeight = ativo ? "bold" : "normal";
+            botao.style.border = ativo ? "none" : "1px solid #444";
         });
-    }
-}
 
-function atualizarLabels() {
-    if (slDbz && lblDbz) {
-        lblDbz.textContent = slDbz.value;
-    }
-
-    if (slVento && lblVento) {
-        lblVento.textContent = slVento.value;
+        if (radarTitle) {
+            radarTitle.textContent =
+                `Display Principal: ${nomesProdutos[produto]}`;
+        }
     }
 
-    if (slDesloc && lblDesloc) {
-        lblDesloc.textContent = slDesloc.value;
-    }
-}
+    Object.entries(buttons).forEach(([produto, botao]) => {
+        botao?.addEventListener("click", () => alternarProduto(produto));
+    });
 
-// ============================================================
-// GRADE DO RADAR
-// ============================================================
+    function desenharGrade() {
+        const w = canvas.width;
+        const h = canvas.height;
+        const cx = w / 2;
+        const cy = h / 2;
 
-function desenharGrade(contexto, largura, altura) {
-    if (!contexto) return;
+        ctx.fillStyle = "#000600";
+        ctx.fillRect(0, 0, w, h);
 
-    const cx = largura / 2;
-    const cy = altura / 2;
+        ctx.strokeStyle = "#123019";
+        ctx.lineWidth = 1;
 
-    contexto.fillStyle = '#000600';
-    contexto.fillRect(0, 0, largura, altura);
+        for (let r = 45; r < Math.min(w, h) / 2; r += 45) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.stroke();
+        }
 
-    contexto.strokeStyle = '#002200';
-    contexto.lineWidth = 1;
-
-    const raioMaximo = Math.hypot(cx, cy);
-
-    for (let raio = 45; raio < raioMaximo; raio += 45) {
-        contexto.beginPath();
-        contexto.arc(cx, cy, raio, 0, 2 * Math.PI);
-        contexto.stroke();
-    }
-
-    contexto.beginPath();
-    contexto.moveTo(cx, 0);
-    contexto.lineTo(cx, altura);
-    contexto.moveTo(0, cy);
-    contexto.lineTo(largura, cy);
-    contexto.stroke();
-
-    // Posição do radar Doppler
-    contexto.fillStyle = '#ffffff';
-    contexto.beginPath();
-    contexto.arc(cx, cy, 3, 0, 2 * Math.PI);
-    contexto.fill();
-}
-
-// ============================================================
-// FUNÇÕES DOS PRODUTOS
-// ============================================================
-
-function obterCorDbz(dbz) {
-    if (dbz > 65) return '#ff00ff';
-    if (dbz > 55) return '#ff0000';
-    if (dbz > 45) return '#ff6600';
-    if (dbz > 35) return '#ffff00';
-    if (dbz > 20) return '#00cc00';
-    return '#006600';
-}
-
-// Convenção do simulador:
-// velocidade positiva = movimento para longe do radar;
-// velocidade negativa = movimento em direção ao radar.
-
-function obterCorVelocidade(velocidade) {
-    const v = velocidade;
-
-    if (v <= -60) return '#00ffff';
-    if (v <= -40) return '#0088ff';
-    if (v <= -20) return '#0044cc';
-    if (v < -5) return '#002266';
-
-    if (v < 5) return '#101010';
-
-    if (v < 20) return '#660000';
-    if (v < 40) return '#cc0000';
-    if (v < 60) return '#ff4444';
-    return '#ffaaaa';
-}
-
-function obterCorCC(cc) {
-    if (cc < 0.55) return '#00ffff';
-    if (cc < 0.75) return '#0099ff';
-    if (cc < 0.90) return '#ffff00';
-    if (cc < 0.96) return '#ff9900';
-    return '#cc0000';
-}
-
-function obterCorKdp(kdp) {
-    if (kdp < 0.2) return '#142414';
-    if (kdp < 0.5) return '#006600';
-    if (kdp < 1.0) return '#00cc00';
-    if (kdp < 2.0) return '#ffff00';
-    if (kdp < 3.0) return '#ff9900';
-    if (kdp < 4.0) return '#ff3300';
-    return '#ff00ff';
-}
-
-// ============================================================
-// GEOMETRIA E CAMPOS SINTÉTICOS
-// ============================================================
-
-function calcularCampos(x, y, estado) {
-    const {
-        tempestadeX: sx,
-        tempestadeY: sy,
-        mesoX,
-        mesoY,
-        dbzMax,
-        ventoMax,
-        desloc,
-        couplet,
-        tds,
-        cx,
-        cy
-    } = estado;
-
-    const dxCorpo = x - sx;
-    const dyCorpo = y - sy;
-
-    const raioCorpo = Math.hypot(dxCorpo, dyCorpo);
-    const anguloCorpo = Math.atan2(dyCorpo, dxCorpo);
-
-    // Corpo assimétrico da supercélula
-    let distorcaoRim = 1;
-
-    if (anguloCorpo > -1.5 && anguloCorpo < 0.5) {
-        distorcaoRim = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(cx, 0);
+        ctx.lineTo(cx, h);
+        ctx.moveTo(0, cy);
+        ctx.lineTo(w, cy);
+        ctx.stroke();
     }
 
-    if (anguloCorpo > 1.0 && anguloCorpo < 2.5) {
-        distorcaoRim = 1.6;
+    // Calcula a evolução com base nos parâmetros configurados.
+    function atualizarTempestade(dt) {
+        const dbzAlvo = Number(slDbz.value);
+        const vento = Number(slVento.value);
+        const desloc = Number(slDesloc.value);
+        const rotacao = seCouplet.value === "1";
+
+        if (dissipou) return;
+
+        idadeTempestade += dt;
+
+        // Pontuação ilustrativa de condições favoráveis.
+        const intensidade = dbzAlvo / 75;
+        const ventoFavoravel = limitar(vento / 90, 0, 1);
+        const deslocFavoravel =
+            limitar(1 - Math.abs(desloc - 25) / 45, 0, 1);
+
+        const organizacao =
+            intensidade * 0.40 +
+            ventoFavoravel * 0.25 +
+            (rotacao ? 0.25 : 0) +
+            deslocFavoravel * 0.10;
+
+        // O ambiente favorável mantém a tempestade;
+        // condições desfavoráveis reduzem sua vitalidade.
+        const tendencia = (organizacao - 0.48) * 10;
+        vitalidade = limitar(vitalidade + tendencia * dt, 0, 100);
+
+        const alvoVisual = dbzAlvo * (vitalidade / 100);
+        intensidadeAtual = interpolar(
+            intensidadeAtual,
+            alvoVisual,
+            1 - Math.exp(-dt * 0.8)
+        );
+
+        const velocidadeTela = desloc * 0.45;
+        tempestadeX += velocidadeTela * dt;
+        tempestadeY += velocidadeTela * 0.22 * dt;
+
+        // Reposiciona a célula quando sai da área de visualização.
+        if (tempestadeX > canvas.width + 100 ||
+            tempestadeY > canvas.height + 100) {
+            tempestadeX = 40;
+            tempestadeY = 60;
+        }
+
+        if (vitalidade <= 0.5 || intensidadeAtual < 1) {
+            dissipou = true;
+        }
     }
 
-    const naSupercelula = raioCorpo * distorcaoRim < 45;
+    // Retorna as características de um ponto do campo.
+    function calcularCampo(x, y) {
+        const dx = x - tempestadeX;
+        const dy = y - tempestadeY;
 
-    let dbz = naSupercelula
-        ? dbzMax * (1 - raioCorpo * distorcaoRim / 45)
-        : 0;
+        const angulo = Math.atan2(dy, dx);
+        const raio = Math.sqrt(dx * dx + dy * dy);
 
-    const dxMeso = x - mesoX;
-    const dyMeso = y - mesoY;
-    const raioMeso = Math.hypot(dxMeso, dyMeso);
-    const anguloMeso = Math.atan2(dyMeso, dxMeso);
+        // Corpo principal, assimétrico.
+        let deformacao = 1;
 
-    // Gancho de refletividade
-    let noGancho = false;
+        if (angulo > -1.5 && angulo < 0.5) deformacao = 0.78;
+        if (angulo > 0.7 && angulo < 2.4) deformacao = 1.35;
 
-    if (couplet) {
-        if (raioMeso > 8 && raioMeso < 24) {
-            const anguloGancho = raioMeso * 0.18 - 2.4;
+        const raioEfetivo = raio * deformacao;
+        const dentroCorpo = raioEfetivo < 48;
 
-            // Normalizar diferença angular para evitar problemas
-            // na passagem entre +PI e -PI.
-            const diferenca = Math.atan2(
-                Math.sin(anguloMeso - anguloGancho),
-                Math.cos(anguloMeso - anguloGancho)
-            );
+        let dbz = dentroCorpo
+            ? intensidadeAtual * (1 - raioEfetivo / 48)
+            : 0;
 
-            if (Math.abs(diferenca) < 0.35) {
-                noGancho = true;
+        const mesoX = tempestadeX + 15;
+        const mesoY = tempestadeY + 25;
+        const mx = x - mesoX;
+        const my = y - mesoY;
+        const raioMeso = Math.hypot(mx, my);
+        const anguloMeso = Math.atan2(my, mx);
 
-                const dbzGancho =
-                    dbzMax * 0.85 * (1 - raioMeso / 30);
+        const rotacao = seCouplet.value === "1";
 
-                dbz = Math.max(dbz, dbzGancho);
+        // Hook echo curvo no quadrante sudoeste.
+        // Em canvas, X cresce para a direita e Y para baixo.
+        // Portanto SW tem mx < 0 e my > 0.
+        let noGancho = false;
+
+        if (rotacao && mx < 0 && my > 0) {
+            const anguloMin = 2.05;
+            const anguloMax = 3.08;
+
+            if (
+                anguloMeso >= anguloMin &&
+                anguloMeso <= anguloMax
+            ) {
+                const progresso =
+                    (anguloMeso - anguloMin) /
+                    (anguloMax - anguloMin);
+
+                const raioAlvo = 13 + progresso * 16;
+                const distanciaArco = Math.abs(raioMeso - raioAlvo);
+
+                if (distanciaArco < 4.2) {
+                    noGancho = true;
+
+                    const dbzGancho =
+                        intensidadeAtual *
+                        0.88 *
+                        limitar(1 - distanciaArco / 5, 0, 1);
+
+                    dbz = Math.max(dbz, dbzGancho);
+                }
             }
         }
 
-        if (raioMeso <= 8) {
-            noGancho = true;
-            dbz = Math.max(dbz, dbzMax * 0.95);
+        // BWER: região de eco fraco cercada por eco mais intenso.
+        // Não deve ser preenchida como um núcleo de dBZ máximo.
+        const dentroBwer = rotacao && raioMeso < 5.5;
+
+        if (dentroBwer) {
+            dbz = Math.min(dbz, intensidadeAtual * 0.12);
         }
-    }
 
-    const ecoPresente = (naSupercelula || noGancho) && dbz > 12;
+        // Dipolo sintético de velocidade radial.
+        // Aproximação visual, não uma solução atmosférica.
+        const distancia = Math.max(1, raioMeso);
+        const velocidadeTangencial =
+            rotacao
+                ? Math.min(Number(slVento.value), 120) *
+                  Math.exp(-distancia / 42)
+                : 0;
 
-    // Direção radial do radar para o pixel
-    const dxRadar = x - cx;
-    const dyRadar = y - cy;
-    const distanciaRadar = Math.hypot(dxRadar, dyRadar);
+        const ventoRadial =
+            velocidadeTangencial *
+            Math.cos(anguloMeso) *
+            Math.sign(my || 1);
 
-    const ux = distanciaRadar > 0 ? dxRadar / distanciaRadar : 0;
-    const uy = distanciaRadar > 0 ? dyRadar / distanciaRadar : 0;
-
-    // Movimento da tempestade: diagonal para a direita e para baixo.
-    // A velocidade do slider é interpretada em mph.
-    const movimentoX = desloc * 0.8944;
-    const movimentoY = desloc * 0.4472;
-
-    // Campo de vento tangencial sintético ao redor do mesociclone.
-    // O perfil diminui com a distância do centro de rotação.
-    let rotacaoX = 0;
-    let rotacaoY = 0;
-
-    if (couplet && raioMeso > 0) {
-        const raioPerfil = Math.max(raioMeso, 4);
-        const fatorRotacao = Math.min(
-            1,
-            Math.max(0, 1 - Math.abs(raioPerfil - 10) / 24)
+        const velocidadeBase = limitar(
+            ventoRadial + Number(slVento.value) * 0.12,
+            -120,
+            120
         );
 
-        const velocidadeTangencial = ventoMax * fatorRotacao;
+        const deslocRadial =
+            Number(slDesloc.value) *
+            Math.cos(anguloMeso);
 
-        rotacaoX = -(dyMeso / raioPerfil) * velocidadeTangencial;
-        rotacaoY = (dxMeso / raioPerfil) * velocidadeTangencial;
-    }
+        const srv = limitar(
+            velocidadeBase - deslocRadial,
+            -120,
+            120
+        );
 
-    // Projeção radial do vento total.
-    // Base Velocity inclui o movimento de translação da tempestade.
-    const ventoTotalX = rotacaoX + movimentoX;
-    const ventoTotalY = rotacaoY + movimentoY;
+        // CC normalmente alto em chuva uniforme.
+        // Redução localizada e irregular na possível assinatura TDS.
+        const ruidoCC =
+            Math.sin(x * 0.19 + y * 0.11) *
+            Math.cos(y * 0.16 - x * 0.07) *
+            0.025;
 
-    const velocidadeBase =
-        ventoTotalX * ux + ventoTotalY * uy;
+        let cc = dentroCorpo ? 0.97 + ruidoCC : 1;
 
-    // SRV remove a componente radial do movimento da tempestade.
-    const movimentoRadial =
-        movimentoX * ux + movimentoY * uy;
+        const possivelDetrito =
+            rotacao &&
+            possivelTds &&
+            raioMeso < 7 &&
+            dbz > 35;
 
-    const velocidadeSRV = velocidadeBase - movimentoRadial;
-
-    // CC sintético: valores altos em precipitação uniforme;
-    // valores baixos na assinatura de detritos simulada.
-    let cc = ecoPresente ? 0.97 : 1.0;
-
-    if (ecoPresente) {
-        const variacaoCC =
-            0.015 * Math.sin(x * 0.19) * Math.cos(y * 0.17);
-
-        cc = Math.max(0, Math.min(1, cc + variacaoCC));
-
-        if (couplet && tds && raioMeso < 6 && dbz > 45) {
-            cc = 0.35 + 0.08 * Math.sin(x + y);
+        if (possivelDetrito) {
+            cc = 0.45 + Math.abs(ruidoCC);
         }
+
+        // KDP sintético: valores mais elevados em partes
+        // da precipitação intensa; não deriva de uma fase simulada real.
+        let kdp = dentroCorpo
+            ? limitar((dbz - 15) / 12, 0, 5)
+            : 0;
+
+        if (noGancho) kdp *= 0.8;
+
+        return {
+            dbz: limitar(dbz, 0, 75),
+            velocidadeBase,
+            srv,
+            cc: limitar(cc, 0, 1),
+            kdp,
+            dentroCorpo,
+            noGancho,
+            dentroBwer,
+            possivelDetrito
+        };
     }
 
-    // KDP sintético: distribuição espacial em regiões de precipitação.
-    // Não representa uma recuperação física real de fase diferencial.
-    let kdp = 0;
-
-    if (ecoPresente) {
-        const intensidadeChuva = Math.max(0, (dbz - 15) / 50);
-        const nucleoChuva = Math.max(0, 1 - raioCorpo / 55);
-        const estruturaLocal =
-            0.25 + 0.75 * Math.abs(Math.sin(x * 0.075 + y * 0.045));
-
-        kdp = intensidadeChuva * nucleoChuva * estruturaLocal * 4.5;
-        kdp = Math.max(0, Math.min(5, kdp));
+    function corDbz(v) {
+        if (v >= 60) return "#ff00ff";
+        if (v >= 50) return "#ff0000";
+        if (v >= 40) return "#ff8800";
+        if (v >= 30) return "#ffff00";
+        if (v >= 20) return "#00ff00";
+        if (v >= 10) return "#00bbbb";
+        return null;
     }
 
-    return {
-        dbz,
-        ecoPresente,
-        raioMeso,
-        velocidadeBase,
-        velocidadeSRV,
-        cc,
-        kdp
-    };
-}
-
-// ============================================================
-// DESENHO DOS PRODUTOS
-// ============================================================
-
-function desenharRadar() {
-    if (!canvas || !ctx) return;
-
-    const largura = canvas.width;
-    const altura = canvas.height;
-
-    desenharGrade(ctx, largura, altura);
-
-    const cx = largura / 2;
-    const cy = altura / 2;
-
-    const desloc = slDesloc ? Number(slDesloc.value) || 0 : 0;
-    const dbzMax = slDbz ? Number(slDbz.value) || 0 : 0;
-    const ventoMax = slVento ? Number(slVento.value) || 0 : 0;
-
-    const estadoCoupletAtual = seCouplet
-        ? seCouplet.value
-        : '0';
-
-    const couplet = estadoCoupletAtual === '1';
-
-    // Movimento visual da tempestade
-    const velDesloc = desloc * 0.015;
-
-    tempestadeX += velDesloc * 0.6;
-    tempestadeY += velDesloc * 0.3;
-
-    if (
-        tempestadeX > largura + 100 ||
-        tempestadeY > altura + 100
-    ) {
-        tempestadeX = 40;
-        tempestadeY = 60;
-        tonaTerra = false;
+    function corVelocidade(v) {
+        if (v > 65) return "#ff0000";
+        if (v > 30) return "#ff7777";
+        if (v > 8) return "#ffcccc";
+        if (v < -65) return "#00ff00";
+        if (v < -30) return "#00bb77";
+        if (v < -8) return "#0066ff";
+        return "#172b19";
     }
 
-    // Chance de 38% ao ativar o couplet, como na versão anterior.
-    if (estadoCoupletAtual === '1' && ultimoEstadoCouplet === '0') {
-        tonaTerra = Math.random() <= 0.38;
+    function corCC(v) {
+        if (v < 0.65) return "#00ffff";
+        if (v < 0.80) return "#0066ff";
+        if (v < 0.90) return "#aa00ff";
+        if (v < 0.96) return "#ff00aa";
+        return "#00aa44";
     }
 
-    if (!couplet) {
-        tonaTerra = false;
+    function corKdp(v) {
+        if (v >= 4) return "#ff00ff";
+        if (v >= 2) return "#ff0000";
+        if (v >= 1) return "#ffff00";
+        if (v >= 0.3) return "#00ff00";
+        return null;
     }
 
-    ultimoEstadoCouplet = estadoCoupletAtual;
+    function desenharTempestade() {
+        const inicioX = Math.max(0, Math.floor(tempestadeX - 100));
+        const fimX = Math.min(canvas.width, Math.ceil(tempestadeX + 100));
+        const inicioY = Math.max(0, Math.floor(tempestadeY - 100));
+        const fimY = Math.min(canvas.height, Math.ceil(tempestadeY + 100));
 
-    const estado = {
-        tempestadeX,
-        tempestadeY,
-        mesoX: tempestadeX + 15,
-        mesoY: tempestadeY + 25,
-        dbzMax,
-        ventoMax,
-        desloc,
-        couplet,
-        tds: tonaTerra,
-        cx,
-        cy
-    };
+        const imagem = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const dados = imagem.data;
 
-    const inicioX = Math.max(0, Math.floor(tempestadeX - 90));
-    const fimX = Math.min(largura, Math.ceil(tempestadeX + 120));
-    const inicioY = Math.max(0, Math.floor(tempestadeY - 90));
-    const fimY = Math.min(altura, Math.ceil(tempestadeY + 120));
+        for (let x = inicioX; x < fimX; x++) {
+            for (let y = inicioY; y < fimY; y++) {
+                const campo = calcularCampo(x, y);
+                let cor = null;
 
-    for (let x = inicioX; x < fimX; x++) {
-        for (let y = inicioY; y < fimY; y++) {
-            const campo = calcularCampos(x, y, estado);
+                switch (produtoAtivo) {
+                    case "dbz":
+                        cor = corDbz(campo.dbz);
+                        break;
+                    case "vento":
+                        cor = corVelocidade(campo.velocidadeBase);
+                        break;
+                    case "srv":
+                        cor = corVelocidade(campo.srv);
+                        break;
+                    case "cc":
+                        cor = corCC(campo.cc);
+                        break;
+                    case "kdp":
+                        cor = corKdp(campo.kdp);
+                        break;
+                }
 
-            if (!campo.ecoPresente) continue;
+                if (!cor) continue;
 
-            switch (produtoAtivo) {
-                case 'dbz':
-                    ctx.fillStyle = obterCorDbz(campo.dbz);
-                    break;
+                const match = cor.match(/\w\w/g);
+                if (!match || match.length < 3) continue;
 
-                case 'vento':
-                    ctx.fillStyle =
-                        obterCorVelocidade(campo.velocidadeBase);
-                    break;
-
-                case 'srv':
-                    ctx.fillStyle =
-                        obterCorVelocidade(campo.velocidadeSRV);
-                    break;
-
-                case 'cc':
-                    ctx.fillStyle = obterCorCC(campo.cc);
-                    break;
-
-                case 'kdp':
-                    ctx.fillStyle = obterCorKdp(campo.kdp);
-                    break;
-
-                default:
-                    ctx.fillStyle = obterCorDbz(campo.dbz);
+                const idx = (y * canvas.width + x) * 4;
+                dados[idx] = parseInt(match[0], 16);
+                dados[idx + 1] = parseInt(match[1], 16);
+                dados[idx + 2] = parseInt(match[2], 16);
+                dados[idx + 3] = 255;
             }
+        }
 
-            ctx.fillRect(x, y, 1, 1);
+        ctx.putImageData(imagem, 0, 0);
+
+        // Marca visual discreta do centro de circulação.
+        if (seCouplet.value === "1") {
+            ctx.strokeStyle = "rgba(255,255,255,0.65)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(tempestadeX + 15, tempestadeY + 25, 5, 0, Math.PI * 2);
+            ctx.stroke();
         }
     }
 
-    // Linha de varredura
-    ctx.strokeStyle = 'rgba(0, 255, 0, 0.18)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(
-        cx + Math.max(cx, cy) * Math.cos(anguloVarredura),
-        cy + Math.max(cx, cy) * Math.sin(anguloVarredura)
-    );
-    ctx.stroke();
+    function desenharVarredura() {
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
 
-    anguloVarredura += 0.03;
-
-    if (anguloVarredura >= Math.PI * 2) {
-        anguloVarredura -= Math.PI * 2;
-    }
-}
-
-// ============================================================
-// SISTEMA DE ALERTAS
-// ============================================================
-
-function processarAlertas() {
-    if (!slDbz || !slVento || !slDesloc || !alertsList) return;
-
-    const dbz = Number(slDbz.value) || 0;
-    const vento = Number(slVento.value) || 0;
-    const desloc = Number(slDesloc.value) || 0;
-
-    const couplet = seCouplet && seCouplet.value === '1';
-    const alertasHTML = [];
-
-    if (vento >= 58 || dbz > 55) {
-        alertasHTML.push(
-            '<div class="alerta severe">⚠️ SEVERE THUNDERSTORM WARNING — SIMULATED</div>'
+        ctx.strokeStyle = "rgba(0,255,0,0.16)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(
+            cx + cx * Math.cos(anguloVarredura),
+            cy + cy * Math.sin(anguloVarredura)
         );
+        ctx.stroke();
+
+        anguloVarredura = (anguloVarredura + 0.025) % (Math.PI * 2);
     }
 
-    // Critério de demonstração, não hidrológico:
-    // deslocamento lento sozinho não deve gerar alerta de inundação.
-    if (desloc < 20 && dbz >= 45) {
-        alertasHTML.push(
-            '<div class="alerta flood">🌊 FLASH FLOOD RISK — SIMULATED</div>'
-        );
-    }
+    function processarAlertas() {
+        if (!alertsList) return;
 
-    if (couplet) {
-        if (tonaTerra && vento >= 70 && dbz > 60) {
-            alertasHTML.push(
-                '<div class="alerta tornado" style="background:#4c0519;border:2px solid #ff0000;">🚨 PDS TORNADO WARNING — SIMULATED TDS</div>'
-            );
+        const dbz = Number(slDbz.value);
+        const vento = Number(slVento.value);
+        const rotacao = seCouplet.value === "1";
+        const alertas = [];
+
+        if (dissipou) {
+            alertas.push("☁️ TEMPESTADE DISSIPADA — SIMULAÇÃO");
         } else {
-            alertasHTML.push(
-                '<div class="alerta tornado">🌪️ TORNADO WARNING — RADAR INDICATED (SIMULATED)</div>'
-            );
+            if (dbz >= 55 && vento >= 58) {
+                alertas.push("⚠️ SEVERE THUNDERSTORM — SIMULADO");
+            }
+
+            if (rotacao && vitalidade > 20) {
+                alertas.push("🌪️ ROTAÇÃO DETECTADA — SIMULAÇÃO");
+            }
+
+            if (rotacao && possivelTds && dbz >= 35) {
+                alertas.push("🟦 POSSÍVEL ASSINATURA DE DETRITOS — SIMULADA");
+            }
+
+            if (Number(slDesloc.value) < 15 && dbz >= 45) {
+                alertas.push("🌊 RISCO DE CHUVA PERSISTENTE — SIMULAÇÃO");
+            }
         }
+
+        if (!alertas.length) {
+            alertas.push("Atmosfera monitorada. Sem alertas simulados.");
+        }
+
+        alertsList.innerHTML = alertas
+            .map(texto => `<div>${texto}</div>`)
+            .join("");
     }
 
-    if (alertasHTML.length === 0) {
-        alertsList.innerHTML =
-            '<span style="color:#10b981;">Atmosfera monitorada. Sem avisos.</span>';
-    } else {
-        alertsList.innerHTML = alertasHTML.join('');
+    function atualizarPainel() {
+        let painel = $("storm-status");
+
+        if (!painel && alertsList?.parentElement) {
+            painel = document.createElement("div");
+            painel.id = "storm-status";
+            painel.style.cssText =
+                "margin-top:12px;padding:10px;background:#101810;" +
+                "border:1px solid #244024;border-radius:6px;color:#baffba;" +
+                "font:12px monospace;line-height:1.7;";
+
+            alertsList.parentElement.appendChild(painel);
+        }
+
+        if (!painel) return;
+
+        const minutos = Math.floor(idadeTempestade / 60);
+        const segundos = Math.floor(idadeTempestade % 60);
+        const tempo = `${String(minutos).padStart(2, "0")}:` +
+                      `${String(segundos).padStart(2, "0")}`;
+
+        let estagio = "Desenvolvimento";
+        if (dissipou) estagio = "Dissipada";
+        else if (vitalidade < 30) estagio = "Dissipação";
+        else if (vitalidade >= 75 && idadeTempestade > 30) estagio = "Maturidade";
+        else if (vitalidade >= 45) estagio = "Organizada";
+
+        painel.innerHTML =
+            `<strong>ESTADO DA TEMPESTADE</strong><br>` +
+            `Tempo de vida: ${tempo}<br>` +
+            `Estágio: ${estagio}<br>` +
+            `Intensidade simulada: ${intensidadeAtual.toFixed(1)} dBZ<br>` +
+            `Vitalidade: ${vitalidade.toFixed(0)}%`;
     }
-}
 
-// ============================================================
-// LOOP PRINCIPAL
-// ============================================================
+    // Reinício manual, disponível sem alterar o HTML.
+    function criarBotaoReiniciar() {
+        if ($("btn-reset")) return;
 
-function loopJogo() {
-    atualizarLabels();
-    processarAlertas();
-    desenharRadar();
-    requestAnimationFrame(loopJogo);
-}
+        const botao = document.createElement("button");
+        botao.id = "btn-reset";
+        botao.textContent = "↻ Reiniciar tempestade";
+        botao.style.cssText =
+            "margin-top:10px;padding:8px 10px;width:100%;" +
+            "background:#17351b;color:#fff;border:1px solid #397342;" +
+            "border-radius:5px;cursor:pointer;";
 
-// Estado inicial da interface
-alternarProduto('dbz');
-loopJogo();
+        botao.addEventListener("click", () => {
+            idadeTempestade = 0;
+            vitalidade = 100;
+            intensidadeAtual = Number(slDbz.value);
+            dissipou = false;
+            tempestadeX = 145;
+            tempestadeY = 155;
+            ultimoTempo = performance.now();
+        });
+
+        $("controls")?.appendChild(botao);
+    }
+
+    // O sorteio de 38% acontece uma única vez ao ativar a rotação.
+    seCouplet.addEventListener("change", () => {
+        if (seCouplet.value === "1" && ultimoEstadoCouplet === "0") {
+            possivelTds = Math.random() < 0.38;
+        }
+
+        if (seCouplet.value === "0") {
+            possivelTds = false;
+        }
+
+        ultimoEstadoCouplet = seCouplet.value;
+    });
+
+    function loop(agora) {
+        const dt = Math.min((agora - ultimoTempo) / 1000, 0.1);
+        ultimoTempo = agora;
+
+        atualizarLabels();
+        atualizarTempestade(dt);
+
+        desenharGrade();
+        desenharTempestade();
+        desenharVarredura();
+
+        processarAlertas();
+        atualizarPainel();
+
+        requestAnimationFrame(loop);
+    }
+
+    criarBotaoReiniciar();
+    alternarProduto("dbz");
+    intensidadeAtual = Number(slDbz.value);
+    requestAnimationFrame(loop);
+})();
