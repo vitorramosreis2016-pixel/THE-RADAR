@@ -1,68 +1,58 @@
-
 (() => {
     "use strict";
 
-    const canvas = document.getElementById("radarCanvas");
-    const ctx = canvas?.getContext("2d");
+    const $ = id => document.getElementById(id);
+    const canvas = $("radarCanvas");
+    const ctx = canvas && canvas.getContext("2d");
 
     if (!canvas || !ctx) {
         console.error("THE-RADAR: canvas radarCanvas não encontrado.");
         return;
     }
 
-    // Controles existentes no HTML
-    const $ = id => document.getElementById(id);
-
     const slDbz = $("sl-dbz");
     const slVento = $("sl-vento");
     const slDesloc = $("sl-desloc");
     const seCouplet = $("se-couplet");
-
     const lblDbz = $("lbl-dbz");
     const lblVento = $("lbl-vento");
     const lblDesloc = $("lbl-desloc");
     const alertsList = $("alerts-list");
     const radarTitle = $("radar-title");
 
-    const btnDbz = $("btn-dbz");
-    const btnVento = $("btn-vento");
-    const btnCc = $("btn-cc");
-
     if (![slDbz, slVento, slDesloc, seCouplet].every(Boolean)) {
-        console.error("THE-RADAR: faltam controles obrigatórios no HTML.");
+        console.error("THE-RADAR: controles obrigatórios ausentes.");
         return;
     }
 
-    // Adiciona SRV e KDP sem exigir alterações no HTML.
-    const productContainer = btnDbz?.parentElement;
+    // Produtos: mantém os botões já existentes e cria SRV/KDP se necessário.
     const buttons = {
-        dbz: btnDbz,
-        vento: btnVento,
-        cc: btnCc
+        dbz: $("btn-dbz"),
+        vento: $("btn-vento"),
+        cc: $("btn-cc")
     };
 
-    function criarBotaoProduto(id, texto) {
-        if (!productContainer) return null;
+    const productContainer = buttons.dbz && buttons.dbz.parentElement;
 
+    function criarBotao(id, label) {
         let button = $(id);
-        if (button) return button;
-
-        button = document.createElement("button");
-        button.id = id;
-        button.className = "btn-product";
-        button.textContent = texto;
-        button.style.cssText =
-            "flex:1;padding:6px;background:#222;color:#fff;" +
-            "border:1px solid #444;border-radius:4px;cursor:pointer;";
-
-        productContainer.appendChild(button);
+        if (!button && productContainer) {
+            button = document.createElement("button");
+            button.id = id;
+            button.className = "btn-product";
+            button.textContent = label;
+            button.style.cssText =
+                "flex:1;min-width:42px;padding:6px;background:#222;color:#fff;" +
+                "border:1px solid #444;border-radius:4px;cursor:pointer;";
+            productContainer.appendChild(button);
+        }
         return button;
     }
 
-    buttons.srv = criarBotaoProduto("btn-srv", "SRV");
-    buttons.kdp = criarBotaoProduto("btn-kdp", "KDP");
+    buttons.srv = criarBotao("btn-srv", "SRV");
+    buttons.kdp = criarBotao("btn-kdp", "KDP");
 
-    const nomesProdutos = {
+    const nomes = {
         dbz: "Refletividade (dBZ)",
         vento: "Velocidade Base (mph)",
         srv: "Storm Relative Velocity (mph)",
@@ -71,25 +61,28 @@
     };
 
     let produtoAtivo = "dbz";
-    let anguloVarredura = 0;
+    let sweepAngle = 0;
 
-    // Estado da tempestade
-    let tempestadeX = 145;
-    let tempestadeY = 155;
-    let idadeTempestade = 0;
-    let vitalidade = 100;
-    let intensidadeAtual = 0;
-    let dissipou = false;
-    let ultimoTempo = performance.now();
+    let stormX = 145;
+    let stormY = 155;
+    let ageSeconds = 0;
+    let vitality = 100;
+    let currentDbz = Number(slDbz.value);
+    let dissipated = false;
+    let previousFrame = performance.now();
+    let possibleTds = false;
+    let previousCouplet = String(seCouplet.value);
 
-    // Assinatura de detritos apenas simulada.
-    let possivelTds = false;
-    let ultimoEstadoCouplet = "0";
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
 
-    const limitar = (v, min, max) =>
-        Math.max(min, Math.min(max, v));
-
-    const interpolar = (a, b, t) => a + (b - a) * t;
+    // Transparente fora dos ecos: evita que CC/Velocity/SRV virem retângulos.
+    const overlay = document.createElement("canvas");
+    overlay.width = canvas.width;
+    overlay.height = canvas.height;
+    const overlayCtx = overlay.getContext("2d");
+    const image = overlayCtx.createImageData(overlay.width, overlay.height);
+    const pixels = image.data;
 
     function atualizarLabels() {
         if (lblDbz) lblDbz.textContent = slDbz.value;
@@ -97,27 +90,25 @@
         if (lblDesloc) lblDesloc.textContent = slDesloc.value;
     }
 
-    function alternarProduto(produto) {
+    function selecionarProduto(produto) {
         produtoAtivo = produto;
 
-        Object.entries(buttons).forEach(([nome, botao]) => {
-            if (!botao) return;
-
-            const ativo = nome === produto;
-            botao.style.background = ativo ? "#00ff00" : "#222";
-            botao.style.color = ativo ? "#000" : "#fff";
-            botao.style.fontWeight = ativo ? "bold" : "normal";
-            botao.style.border = ativo ? "none" : "1px solid #444";
+        Object.entries(buttons).forEach(([key, button]) => {
+            if (!button) return;
+            const active = key === produto;
+            button.style.background = active ? "#00ff00" : "#222";
+            button.style.color = active ? "#000" : "#fff";
+            button.style.fontWeight = active ? "bold" : "normal";
+            button.style.border = active ? "none" : "1px solid #444";
         });
 
         if (radarTitle) {
-            radarTitle.textContent =
-                `Display Principal: ${nomesProdutos[produto]}`;
+            radarTitle.textContent = "Display Principal: " + nomes[produto];
         }
     }
 
-    Object.entries(buttons).forEach(([produto, botao]) => {
-        botao?.addEventListener("click", () => alternarProduto(produto));
+    Object.entries(buttons).forEach(([produto, button]) => {
+        if (button) button.addEventListener("click", () => selecionarProduto(produto));
     });
 
     function desenharGrade() {
@@ -128,7 +119,6 @@
 
         ctx.fillStyle = "#000600";
         ctx.fillRect(0, 0, w, h);
-
         ctx.strokeStyle = "#123019";
         ctx.lineWidth = 1;
 
@@ -146,437 +136,388 @@
         ctx.stroke();
     }
 
-    // Calcula a evolução com base nos parâmetros configurados.
     function atualizarTempestade(dt) {
-        const dbzAlvo = Number(slDbz.value);
-        const vento = Number(slVento.value);
-        const desloc = Number(slDesloc.value);
-        const rotacao = seCouplet.value === "1";
+        if (dissipated) return;
 
-        if (dissipou) return;
+        const dbzTarget = Number(slDbz.value);
+        const wind = Number(slVento.value);
+        const motion = Number(slDesloc.value);
+        const rotating = seCouplet.value === "1";
 
-        idadeTempestade += dt;
+        ageSeconds += dt;
 
-        // Pontuação ilustrativa de condições favoráveis.
-        const intensidade = dbzAlvo / 75;
-        const ventoFavoravel = limitar(vento / 90, 0, 1);
-        const deslocFavoravel =
-            limitar(1 - Math.abs(desloc - 25) / 45, 0, 1);
+        // Índice ilustrativo de condições sustentadoras, não um modelo NWP.
+        const organization =
+            (dbzTarget / 75) * 0.40 +
+            clamp(wind / 90, 0, 1) * 0.25 +
+            (rotating ? 0.25 : 0) +
+            clamp(1 - Math.abs(motion - 25) / 45, 0, 1) * 0.10;
 
-        const organizacao =
-            intensidade * 0.40 +
-            ventoFavoravel * 0.25 +
-            (rotacao ? 0.25 : 0) +
-            deslocFavoravel * 0.10;
+        vitality = clamp(vitality + (organization - 0.48) * 10 * dt, 0, 100);
 
-        // O ambiente favorável mantém a tempestade;
-        // condições desfavoráveis reduzem sua vitalidade.
-        const tendencia = (organizacao - 0.48) * 10;
-        vitalidade = limitar(vitalidade + tendencia * dt, 0, 100);
-
-        const alvoVisual = dbzAlvo * (vitalidade / 100);
-        intensidadeAtual = interpolar(
-            intensidadeAtual,
-            alvoVisual,
+        currentDbz = lerp(
+            currentDbz,
+            dbzTarget * vitality / 100,
             1 - Math.exp(-dt * 0.8)
         );
 
-        const velocidadeTela = desloc * 0.45;
-        tempestadeX += velocidadeTela * dt;
-        tempestadeY += velocidadeTela * 0.22 * dt;
+        stormX += motion * 0.45 * dt;
+        stormY += motion * 0.10 * dt;
 
-        // Reposiciona a célula quando sai da área de visualização.
-        if (tempestadeX > canvas.width + 100 ||
-            tempestadeY > canvas.height + 100) {
-            tempestadeX = 40;
-            tempestadeY = 60;
+        if (stormX > canvas.width + 100 || stormY > canvas.height + 100) {
+            stormX = 40;
+            stormY = 60;
         }
 
-        if (vitalidade <= 0.5 || intensidadeAtual < 1) {
-            dissipou = true;
-        }
+        if (vitality <= 0.5 || currentDbz < 1) dissipated = true;
     }
 
-    // Retorna as características de um ponto do campo.
+    // Campo de eco único compartilhado por todos os produtos.
     function calcularCampo(x, y) {
-        const dx = x - tempestadeX;
-        const dy = y - tempestadeY;
+        const dx = x - stormX;
+        const dy = y - stormY;
+        const angle = Math.atan2(dy, dx);
+        const radius = Math.hypot(dx, dy);
 
-        const angulo = Math.atan2(dy, dx);
-        const raio = Math.sqrt(dx * dx + dy * dy);
+        // Corpo de precipitação assimétrico.
+        let deformation = 1;
+        if (angle > -1.5 && angle < 0.5) deformation = 0.78;
+        if (angle > 0.7 && angle < 2.4) deformation = 1.35;
 
-        // Corpo principal, assimétrico.
-        let deformacao = 1;
-
-        if (angulo > -1.5 && angulo < 0.5) deformacao = 0.78;
-        if (angulo > 0.7 && angulo < 2.4) deformacao = 1.35;
-
-        const raioEfetivo = raio * deformacao;
-        const dentroCorpo = raioEfetivo < 48;
-
-        let dbz = dentroCorpo
-            ? intensidadeAtual * (1 - raioEfetivo / 48)
+        const bodyRadius = radius * deformation;
+        const insideBody = bodyRadius < 48;
+        let dbz = insideBody
+            ? currentDbz * Math.pow(1 - bodyRadius / 48, 0.72)
             : 0;
 
-        const mesoX = tempestadeX + 15;
-        const mesoY = tempestadeY + 25;
+        const mesoX = stormX + 15;
+        const mesoY = stormY + 25;
         const mx = x - mesoX;
         const my = y - mesoY;
-        const raioMeso = Math.hypot(mx, my);
-        const anguloMeso = Math.atan2(my, mx);
+        const rMeso = Math.hypot(mx, my);
+        const aMeso = Math.atan2(my, mx);
+        const rotating = seCouplet.value === "1";
 
-        const rotacao = seCouplet.value === "1";
+        // Hook echo no sudoeste (x negativo e y positivo no canvas).
+        // Um arco estreito, com raio variável para formar uma curva.
+        let hookEcho = false;
+        if (rotating && mx < 0 && my > 0) {
+            const minAngle = 2.02;
+            const maxAngle = 3.08;
 
-        // Hook echo curvo no quadrante sudoeste.
-        // Em canvas, X cresce para a direita e Y para baixo.
-        // Portanto SW tem mx < 0 e my > 0.
-        let noGancho = false;
+            if (aMeso >= minAngle && aMeso <= maxAngle) {
+                const t = (aMeso - minAngle) / (maxAngle - minAngle);
+                const targetRadius = 12 + 17 * t;
+                const arcDistance = Math.abs(rMeso - targetRadius);
 
-        if (rotacao && mx < 0 && my > 0) {
-            const anguloMin = 2.05;
-            const anguloMax = 3.08;
-
-            if (
-                anguloMeso >= anguloMin &&
-                anguloMeso <= anguloMax
-            ) {
-                const progresso =
-                    (anguloMeso - anguloMin) /
-                    (anguloMax - anguloMin);
-
-                const raioAlvo = 13 + progresso * 16;
-                const distanciaArco = Math.abs(raioMeso - raioAlvo);
-
-                if (distanciaArco < 4.2) {
-                    noGancho = true;
-
-                    const dbzGancho =
-                        intensidadeAtual *
-                        0.88 *
-                        limitar(1 - distanciaArco / 5, 0, 1);
-
-                    dbz = Math.max(dbz, dbzGancho);
+                if (arcDistance < 4.5) {
+                    hookEcho = true;
+                    const hookDbz = currentDbz * 0.88 *
+                        clamp(1 - arcDistance / 4.5, 0, 1);
+                    dbz = Math.max(dbz, hookDbz);
                 }
             }
         }
 
-        // BWER: região de eco fraco cercada por eco mais intenso.
-        // Não deve ser preenchida como um núcleo de dBZ máximo.
-        const dentroBwer = rotacao && raioMeso < 5.5;
+        // Região central de eco fraco (BWER) em vez de núcleo superbrilhante.
+        const insideBwer = rotating && rMeso < 5.5;
+        if (insideBwer) dbz = Math.min(dbz, currentDbz * 0.12);
 
-        if (dentroBwer) {
-            dbz = Math.min(dbz, intensidadeAtual * 0.12);
+        const inEcho = dbz >= 8 || (hookEcho && currentDbz >= 8);
+        const inVelocityDomain = rotating && rMeso < 53 && currentDbz > 8;
+        const activeArea = inEcho || inVelocityDomain;
+
+        if (!activeArea) {
+            return {
+                active: false, dbz: 0, baseVelocity: 0, srv: 0,
+                cc: 1, kdp: 0, hookEcho: false, possibleDebris: false
+            };
         }
 
-        // Dipolo sintético de velocidade radial.
-        // Aproximação visual, não uma solução atmosférica.
-        const distancia = Math.max(1, raioMeso);
-        const velocidadeTangencial =
-            rotacao
-                ? Math.min(Number(slVento.value), 120) *
-                  Math.exp(-distancia / 42)
-                : 0;
-
-        const ventoRadial =
-            velocidadeTangencial *
-            Math.cos(anguloMeso) *
-            Math.sign(my || 1);
-
-        const velocidadeBase = limitar(
-            ventoRadial + Number(slVento.value) * 0.12,
-            -120,
-            120
-        );
-
-        const deslocRadial =
-            Number(slDesloc.value) *
-            Math.cos(anguloMeso);
-
-        const srv = limitar(
-            velocidadeBase - deslocRadial,
-            -120,
-            120
-        );
-
-        // CC normalmente alto em chuva uniforme.
-        // Redução localizada e irregular na possível assinatura TDS.
-        const ruidoCC =
-            Math.sin(x * 0.19 + y * 0.11) *
-            Math.cos(y * 0.16 - x * 0.07) *
-            0.025;
-
-        let cc = dentroCorpo ? 0.97 + ruidoCC : 1;
-
-        const possivelDetrito =
-            rotacao &&
-            possivelTds &&
-            raioMeso < 7 &&
-            dbz > 35;
-
-        if (possivelDetrito) {
-            cc = 0.45 + Math.abs(ruidoCC);
-        }
-
-        // KDP sintético: valores mais elevados em partes
-        // da precipitação intensa; não deriva de uma fase simulada real.
-        let kdp = dentroCorpo
-            ? limitar((dbz - 15) / 12, 0, 5)
+        // Vetor tangencial de uma circulação idealizada.
+        // Projeção sobre o feixe do radar = velocidade radial sintética.
+        const rSafe = Math.max(rMeso, 1);
+        const tangentialSpeed = rotating
+            ? Number(slVento.value) * Math.exp(-rMeso / 42)
             : 0;
 
-        if (noGancho) kdp *= 0.8;
+        const vxRotation = -my / rSafe * tangentialSpeed;
+        const vyRotation = mx / rSafe * tangentialSpeed;
+
+        const radarX = x - canvas.width / 2;
+        const radarY = y - canvas.height / 2;
+        const radarRange = Math.max(1, Math.hypot(radarX, radarY));
+        const beamX = radarX / radarRange;
+        const beamY = radarY / radarRange;
+
+        const motionX = Number(slDesloc.value) * 0.45;
+        const motionY = Number(slDesloc.value) * 0.10;
+
+        const stormMotionRadial = motionX * beamX + motionY * beamY;
+        const rotationRadial = vxRotation * beamX + vyRotation * beamY;
+
+        const baseVelocity = clamp(
+            stormMotionRadial + rotationRadial,
+            -120,
+            120
+        );
+        const srv = clamp(baseVelocity - stormMotionRadial, -120, 120);
+
+        // CC é desenhado somente onde há eco, nunca em toda a caixa de cálculo.
+        const noise =
+            Math.sin(x * 0.19 + y * 0.11) *
+            Math.cos(y * 0.16 - x * 0.07) * 0.025;
+
+        let cc = inEcho ? clamp(0.975 + noise, 0.90, 1) : 1;
+        const possibleDebris =
+            rotating && possibleTds && rMeso < 7 && dbz > 35;
+
+        if (possibleDebris) {
+            cc = 0.48 + Math.abs(noise);
+        }
+
+        // KDP ilustrativo associado à precipitação simulada.
+        const kdp = inEcho ? clamp((dbz - 15) / 12, 0, 5) : 0;
 
         return {
-            dbz: limitar(dbz, 0, 75),
-            velocidadeBase,
+            active: true,
+            inEcho,
+            dbz: clamp(dbz, 0, 75),
+            baseVelocity,
             srv,
-            cc: limitar(cc, 0, 1),
+            cc: clamp(cc, 0, 1),
             kdp,
-            dentroCorpo,
-            noGancho,
-            dentroBwer,
-            possivelDetrito
+            hookEcho,
+            insideBwer,
+            possibleDebris
         };
     }
 
     function corDbz(v) {
-        if (v >= 60) return "#ff00ff";
-        if (v >= 50) return "#ff0000";
-        if (v >= 40) return "#ff8800";
-        if (v >= 30) return "#ffff00";
-        if (v >= 20) return "#00ff00";
-        if (v >= 10) return "#00bbbb";
+        if (v >= 60) return [255, 0, 255];
+        if (v >= 50) return [255, 0, 0];
+        if (v >= 40) return [255, 136, 0];
+        if (v >= 30) return [255, 255, 0];
+        if (v >= 20) return [0, 255, 0];
+        if (v >= 10) return [0, 187, 187];
         return null;
     }
 
     function corVelocidade(v) {
-        if (v > 65) return "#ff0000";
-        if (v > 30) return "#ff7777";
-        if (v > 8) return "#ffcccc";
-        if (v < -65) return "#00ff00";
-        if (v < -30) return "#00bb77";
-        if (v < -8) return "#0066ff";
-        return "#172b19";
+        // Verde = movimento negativo (em direção ao radar);
+        // vermelho = positivo (afastando-se), convenção deste simulador.
+        if (v >= 65) return [255, 0, 0];
+        if (v >= 30) return [255, 90, 90];
+        if (v >= 8) return [255, 190, 190];
+        if (v <= -65) return [0, 255, 0];
+        if (v <= -30) return [0, 190, 90];
+        if (v <= -8) return [0, 100, 255];
+        return [90, 90, 90];
     }
 
     function corCC(v) {
-        if (v < 0.65) return "#00ffff";
-        if (v < 0.80) return "#0066ff";
-        if (v < 0.90) return "#aa00ff";
-        if (v < 0.96) return "#ff00aa";
-        return "#00aa44";
+        if (v < 0.65) return [0, 255, 255];
+        if (v < 0.80) return [0, 90, 255];
+        if (v < 0.90) return [170, 0, 255];
+        if (v < 0.96) return [255, 0, 170];
+        return [0, 170, 65];
     }
 
     function corKdp(v) {
-        if (v >= 4) return "#ff00ff";
-        if (v >= 2) return "#ff0000";
-        if (v >= 1) return "#ffff00";
-        if (v >= 0.3) return "#00ff00";
+        if (v >= 4) return [255, 0, 255];
+        if (v >= 2) return [255, 0, 0];
+        if (v >= 1) return [255, 255, 0];
+        if (v >= 0.3) return [0, 255, 0];
         return null;
     }
 
-    function desenharTempestade() {
-        const inicioX = Math.max(0, Math.floor(tempestadeX - 100));
-        const fimX = Math.min(canvas.width, Math.ceil(tempestadeX + 100));
-        const inicioY = Math.max(0, Math.floor(tempestadeY - 100));
-        const fimY = Math.min(canvas.height, Math.ceil(tempestadeY + 100));
+    function corProduto(campo) {
+        if (produtoAtivo === "dbz") return campo.inEcho ? corDbz(campo.dbz) : null;
+        if (produtoAtivo === "vento") return campo.active ? corVelocidade(campo.baseVelocity) : null;
+        if (produtoAtivo === "srv") return campo.active ? corVelocidade(campo.srv) : null;
+        if (produtoAtivo === "cc") return campo.inEcho ? corCC(campo.cc) : null;
+        if (produtoAtivo === "kdp") return campo.inEcho ? corKdp(campo.kdp) : null;
+        return null;
+    }
 
-        const imagem = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const dados = imagem.data;
+    function desenharEcos() {
+        // Zera o overlay inteiro a cada quadro: nenhum resíduo retangular.
+        pixels.fill(0);
 
-        for (let x = inicioX; x < fimX; x++) {
-            for (let y = inicioY; y < fimY; y++) {
-                const campo = calcularCampo(x, y);
-                let cor = null;
+        const left = Math.max(0, Math.floor(stormX - 105));
+        const right = Math.min(canvas.width, Math.ceil(stormX + 105));
+        const top = Math.max(0, Math.floor(stormY - 105));
+        const bottom = Math.min(canvas.height, Math.ceil(stormY + 105));
 
-                switch (produtoAtivo) {
-                    case "dbz":
-                        cor = corDbz(campo.dbz);
-                        break;
-                    case "vento":
-                        cor = corVelocidade(campo.velocidadeBase);
-                        break;
-                    case "srv":
-                        cor = corVelocidade(campo.srv);
-                        break;
-                    case "cc":
-                        cor = corCC(campo.cc);
-                        break;
-                    case "kdp":
-                        cor = corKdp(campo.kdp);
-                        break;
-                }
+        for (let y = top; y < bottom; y++) {
+            for (let x = left; x < right; x++) {
+                const field = calcularCampo(x + 0.5, y + 0.5);
+                const color = corProduto(field);
+                if (!color) continue;
 
-                if (!cor) continue;
-
-                const match = cor.match(/\w\w/g);
-                if (!match || match.length < 3) continue;
-
-                const idx = (y * canvas.width + x) * 4;
-                dados[idx] = parseInt(match[0], 16);
-                dados[idx + 1] = parseInt(match[1], 16);
-                dados[idx + 2] = parseInt(match[2], 16);
-                dados[idx + 3] = 255;
+                const i = (y * overlay.width + x) * 4;
+                pixels[i] = color[0];
+                pixels[i + 1] = color[1];
+                pixels[i + 2] = color[2];
+                pixels[i + 3] = 255;
             }
         }
 
-        ctx.putImageData(imagem, 0, 0);
+        overlayCtx.putImageData(image, 0, 0);
+        desenharGrade();
+        ctx.drawImage(overlay, 0, 0);
 
-        // Marca visual discreta do centro de circulação.
-        if (seCouplet.value === "1") {
-            ctx.strokeStyle = "rgba(255,255,255,0.65)";
+        // Marcador do centro de circulação.
+        if (seCouplet.value === "1" && !dissipated) {
+            ctx.strokeStyle = "rgba(255,255,255,0.7)";
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.arc(tempestadeX + 15, tempestadeY + 25, 5, 0, Math.PI * 2);
+            ctx.arc(stormX + 15, stormY + 25, 5, 0, Math.PI * 2);
             ctx.stroke();
         }
-    }
 
-    function desenharVarredura() {
-        const cx = canvas.width / 2;
-        const cy = canvas.height / 2;
-
-        ctx.strokeStyle = "rgba(0,255,0,0.16)";
+        ctx.strokeStyle = "rgba(0,255,0,0.18)";
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(cx, cy);
+        ctx.moveTo(canvas.width / 2, canvas.height / 2);
         ctx.lineTo(
-            cx + cx * Math.cos(anguloVarredura),
-            cy + cy * Math.sin(anguloVarredura)
+            canvas.width / 2 + canvas.width / 2 * Math.cos(sweepAngle),
+            canvas.height / 2 + canvas.height / 2 * Math.sin(sweepAngle)
         );
         ctx.stroke();
 
-        anguloVarredura = (anguloVarredura + 0.025) % (Math.PI * 2);
+        sweepAngle = (sweepAngle + 0.025) % (Math.PI * 2);
     }
 
     function processarAlertas() {
         if (!alertsList) return;
 
         const dbz = Number(slDbz.value);
-        const vento = Number(slVento.value);
-        const rotacao = seCouplet.value === "1";
-        const alertas = [];
+        const wind = Number(slVento.value);
+        const rotating = seCouplet.value === "1";
+        const alerts = [];
 
-        if (dissipou) {
-            alertas.push("☁️ TEMPESTADE DISSIPADA — SIMULAÇÃO");
+        if (dissipated) {
+            alerts.push("☁️ TEMPESTADE DISSIPADA — SIMULAÇÃO");
         } else {
-            if (dbz >= 55 && vento >= 58) {
-                alertas.push("⚠️ SEVERE THUNDERSTORM — SIMULADO");
+            if (dbz >= 55 && wind >= 58) {
+                alerts.push("⚠️ TEMPESTADE SEVERA — SIMULAÇÃO");
             }
-
-            if (rotacao && vitalidade > 20) {
-                alertas.push("🌪️ ROTAÇÃO DETECTADA — SIMULAÇÃO");
+            if (rotating && vitality > 20) {
+                alerts.push("🌪️ ROTAÇÃO DETECTADA — SIMULAÇÃO");
             }
-
-            if (rotacao && possivelTds && dbz >= 35) {
-                alertas.push("🟦 POSSÍVEL ASSINATURA DE DETRITOS — SIMULADA");
+            if (rotating && possibleTds && dbz >= 35) {
+                alerts.push("🟦 POSSÍVEL ASSINATURA DE DETRITOS — SIMULADA");
             }
-
             if (Number(slDesloc.value) < 15 && dbz >= 45) {
-                alertas.push("🌊 RISCO DE CHUVA PERSISTENTE — SIMULAÇÃO");
+                alerts.push("🌊 RISCO DE CHUVA PERSISTENTE — SIMULAÇÃO");
             }
         }
 
-        if (!alertas.length) {
-            alertas.push("Atmosfera monitorada. Sem alertas simulados.");
-        }
-
-        alertsList.innerHTML = alertas
-            .map(texto => `<div>${texto}</div>`)
-            .join("");
+        if (!alerts.length) alerts.push("Atmosfera monitorada. Sem alertas simulados.");
+        alertsList.textContent = "";
+        alerts.forEach(message => {
+            const line = document.createElement("div");
+            line.textContent = message;
+            alertsList.appendChild(line);
+        });
     }
 
-    function atualizarPainel() {
-        let painel = $("storm-status");
+    function criarPainelStatus() {
+        let panel = $("storm-status");
+        if (panel) return panel;
 
-        if (!painel && alertsList?.parentElement) {
-            painel = document.createElement("div");
-            painel.id = "storm-status";
-            painel.style.cssText =
-                "margin-top:12px;padding:10px;background:#101810;" +
-                "border:1px solid #244024;border-radius:6px;color:#baffba;" +
-                "font:12px monospace;line-height:1.7;";
+        const parent = alertsList && alertsList.parentElement;
+        if (!parent) return null;
 
-            alertsList.parentElement.appendChild(painel);
-        }
-
-        if (!painel) return;
-
-        const minutos = Math.floor(idadeTempestade / 60);
-        const segundos = Math.floor(idadeTempestade % 60);
-        const tempo = `${String(minutos).padStart(2, "0")}:` +
-                      `${String(segundos).padStart(2, "0")}`;
-
-        let estagio = "Desenvolvimento";
-        if (dissipou) estagio = "Dissipada";
-        else if (vitalidade < 30) estagio = "Dissipação";
-        else if (vitalidade >= 75 && idadeTempestade > 30) estagio = "Maturidade";
-        else if (vitalidade >= 45) estagio = "Organizada";
-
-        painel.innerHTML =
-            `<strong>ESTADO DA TEMPESTADE</strong><br>` +
-            `Tempo de vida: ${tempo}<br>` +
-            `Estágio: ${estagio}<br>` +
-            `Intensidade simulada: ${intensidadeAtual.toFixed(1)} dBZ<br>` +
-            `Vitalidade: ${vitalidade.toFixed(0)}%`;
+        panel = document.createElement("div");
+        panel.id = "storm-status";
+        panel.style.cssText =
+            "margin-top:12px;padding:10px;background:#101810;" +
+            "border:1px solid #244024;border-radius:6px;color:#baffba;" +
+            "font:12px monospace;line-height:1.7;";
+        parent.appendChild(panel);
+        return panel;
     }
 
-    // Reinício manual, disponível sem alterar o HTML.
+    function atualizarPainelStatus() {
+        const panel = criarPainelStatus();
+        if (!panel) return;
+
+        const totalSeconds = Math.floor(ageSeconds);
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        let stage = "Desenvolvimento";
+
+        if (dissipated) stage = "Dissipada";
+        else if (vitality < 30) stage = "Dissipação";
+        else if (vitality >= 75 && ageSeconds > 30) stage = "Maturidade";
+        else if (vitality >= 45) stage = "Organizada";
+
+        panel.textContent =
+            "ESTADO DA TEMPESTADE\n" +
+            "Tempo de vida: " + String(minutes).padStart(2, "0") + ":" +
+            String(seconds).padStart(2, "0") + "\n" +
+            "Estágio: " + stage + "\n" +
+            "Refletividade simulada: " + currentDbz.toFixed(1) + " dBZ\n" +
+            "Vitalidade: " + vitality.toFixed(0) + "%";
+        panel.style.whiteSpace = "pre-line";
+    }
+
     function criarBotaoReiniciar() {
         if ($("btn-reset")) return;
 
-        const botao = document.createElement("button");
-        botao.id = "btn-reset";
-        botao.textContent = "↻ Reiniciar tempestade";
-        botao.style.cssText =
+        const controls = $("controls");
+        if (!controls) return;
+
+        const button = document.createElement("button");
+        button.id = "btn-reset";
+        button.textContent = "↻ Reiniciar tempestade";
+        button.style.cssText =
             "margin-top:10px;padding:8px 10px;width:100%;" +
             "background:#17351b;color:#fff;border:1px solid #397342;" +
             "border-radius:5px;cursor:pointer;";
 
-        botao.addEventListener("click", () => {
-            idadeTempestade = 0;
-            vitalidade = 100;
-            intensidadeAtual = Number(slDbz.value);
-            dissipou = false;
-            tempestadeX = 145;
-            tempestadeY = 155;
-            ultimoTempo = performance.now();
+        button.addEventListener("click", () => {
+            ageSeconds = 0;
+            vitality = 100;
+            currentDbz = Number(slDbz.value);
+            dissipated = false;
+            stormX = 145;
+            stormY = 155;
+            previousFrame = performance.now();
         });
 
-        $("controls")?.appendChild(botao);
+        controls.appendChild(button);
     }
 
-    // O sorteio de 38% acontece uma única vez ao ativar a rotação.
     seCouplet.addEventListener("change", () => {
-        if (seCouplet.value === "1" && ultimoEstadoCouplet === "0") {
-            possivelTds = Math.random() < 0.38;
+        const state = String(seCouplet.value);
+
+        if (state === "1" && previousCouplet === "0") {
+            // Evento único ao ligar a rotação; 38% é uma chance didática,
+            // não uma probabilidade meteorológica real.
+            possibleTds = Math.random() < 0.38;
         }
 
-        if (seCouplet.value === "0") {
-            possivelTds = false;
-        }
-
-        ultimoEstadoCouplet = seCouplet.value;
+        if (state === "0") possibleTds = false;
+        previousCouplet = state;
     });
 
-    function loop(agora) {
-        const dt = Math.min((agora - ultimoTempo) / 1000, 0.1);
-        ultimoTempo = agora;
+    function loop(now) {
+        const dt = Math.min((now - previousFrame) / 1000, 0.1);
+        previousFrame = now;
 
         atualizarLabels();
         atualizarTempestade(dt);
-
-        desenharGrade();
-        desenharTempestade();
-        desenharVarredura();
-
+        desenharEcos();
         processarAlertas();
-        atualizarPainel();
+        atualizarPainelStatus();
 
         requestAnimationFrame(loop);
     }
 
     criarBotaoReiniciar();
-    alternarProduto("dbz");
-    intensidadeAtual = Number(slDbz.value);
+    selecionarProduto("dbz");
     requestAnimationFrame(loop);
 })();
